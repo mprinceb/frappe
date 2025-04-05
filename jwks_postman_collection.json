@@ -1,0 +1,460 @@
+{
+  "info": {
+    "_postman_id": "a8e90eff-ac6e-4c8a-a49f-28b4b5e8dcfa",
+    "name": "Frappe JWKS Testing",
+    "description": "A collection to test the JWKS implementation for Frappe OAuth2/OpenID Connect",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string",
+      "description": "The base URL of your Frappe instance"
+    },
+    {
+      "key": "client_id",
+      "value": "your_client_id",
+      "type": "string",
+      "description": "Your OAuth Client ID"
+    },
+    {
+      "key": "client_secret",
+      "value": "your_client_secret",
+      "type": "string",
+      "description": "Your OAuth Client Secret"
+    },
+    {
+      "key": "redirect_uri",
+      "value": "http://localhost",
+      "type": "string",
+      "description": "Your redirect URI"
+    },
+    {
+      "key": "code",
+      "value": "",
+      "type": "string",
+      "description": "The authorization code from the authorize request"
+    },
+    {
+      "key": "access_token",
+      "value": "",
+      "type": "string",
+      "description": "The access token received from the token endpoint"
+    },
+    {
+      "key": "id_token",
+      "value": "",
+      "type": "string",
+      "description": "The ID token received from the token endpoint"
+    },
+    {
+      "key": "refresh_token",
+      "value": "",
+      "type": "string",
+      "description": "The refresh token received from the token endpoint"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. OpenID Configuration",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/.well-known/openid-configuration",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            ".well-known",
+            "openid-configuration"
+          ]
+        },
+        "description": "Retrieves the OpenID Connect configuration, which should include JWKS URI when JWKS is enabled"
+      },
+      "response": []
+    },
+    {
+      "name": "2. JWKS Endpoint",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/.well-known/jwks.json",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            ".well-known",
+            "jwks.json"
+          ]
+        },
+        "description": "Retrieves the JSON Web Key Set (JWKS) containing public keys for JWT verification"
+      },
+      "response": []
+    },
+    {
+      "name": "3. Authorization Request",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/method/frappe.integrations.oauth2.authorize?client_id={{client_id}}&response_type=code&scope=openid profile email&redirect_uri={{redirect_uri}}",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "frappe.integrations.oauth2.authorize"
+          ],
+          "query": [
+            {
+              "key": "client_id",
+              "value": "{{client_id}}"
+            },
+            {
+              "key": "response_type",
+              "value": "code"
+            },
+            {
+              "key": "scope",
+              "value": "openid profile email"
+            },
+            {
+              "key": "redirect_uri",
+              "value": "{{redirect_uri}}"
+            }
+          ]
+        },
+        "description": "Initiates the authorization flow. You'll need to be logged in to Frappe. This will redirect to the login page if not authenticated, and then to the redirect_uri with a code parameter after successful authorization."
+      },
+      "response": []
+    },
+    {
+      "name": "4. Exchange Code for Token",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "// Store tokens from response",
+              "var jsonData = pm.response.json();",
+              "if (jsonData.access_token) {",
+              "    pm.collectionVariables.set(\"access_token\", jsonData.access_token);",
+              "}",
+              "if (jsonData.id_token) {",
+              "    pm.collectionVariables.set(\"id_token\", jsonData.id_token);",
+              "}",
+              "if (jsonData.refresh_token) {",
+              "    pm.collectionVariables.set(\"refresh_token\", jsonData.refresh_token);",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/x-www-form-urlencoded"
+          }
+        ],
+        "body": {
+          "mode": "urlencoded",
+          "urlencoded": [
+            {
+              "key": "grant_type",
+              "value": "authorization_code",
+              "type": "text"
+            },
+            {
+              "key": "code",
+              "value": "{{code}}",
+              "type": "text",
+              "description": "Enter the code from the redirect URL after authorization"
+            },
+            {
+              "key": "redirect_uri",
+              "value": "{{redirect_uri}}",
+              "type": "text"
+            },
+            {
+              "key": "client_id",
+              "value": "{{client_id}}",
+              "type": "text"
+            },
+            {
+              "key": "client_secret",
+              "value": "{{client_secret}}",
+              "type": "text"
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{base_url}}/api/method/frappe.integrations.oauth2.get_token",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "frappe.integrations.oauth2.get_token"
+          ]
+        },
+        "description": "Exchanges the authorization code for an access token and ID token. Before running this, manually set the 'code' collection variable to the code received from the authorize endpoint."
+      },
+      "response": []
+    },
+    {
+      "name": "5. Inspect ID Token",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "// Validate token structure",
+              "var token = pm.collectionVariables.get(\"id_token\");",
+              "var parts = token.split('.');",
+              "",
+              "// There should be three parts: header, payload, signature",
+              "pm.test(\"Token has three parts\", function() {",
+              "    pm.expect(parts.length).to.equal(3);",
+              "});",
+              "",
+              "// Decode the header",
+              "var headerB64 = parts[0];",
+              "var headerString = CryptoJS.enc.Base64.parse(headerB64.replace(/-/g, '+').replace(/_/g, '/').toString()).toString(CryptoJS.enc.Utf8);",
+              "var header = JSON.parse(headerString);",
+              "",
+              "// Verify algorithm is RS256 when JWKS is enabled",
+              "pm.test(\"Token is signed with RS256\", function() {",
+              "    pm.expect(header.alg).to.equal(\"RS256\");",
+              "});",
+              "",
+              "// Verify kid is present",
+              "pm.test(\"Token has kid\", function() {",
+              "    pm.expect(header).to.have.property('kid');",
+              "});",
+              "",
+              "// Decode the payload",
+              "var payloadB64 = parts[1];",
+              "var payloadString = CryptoJS.enc.Base64.parse(payloadB64.replace(/-/g, '+').replace(/_/g, '/').toString()).toString(CryptoJS.enc.Utf8);",
+              "var payload = JSON.parse(payloadString);",
+              "",
+              "console.log('Token header:', header);",
+              "console.log('Token payload:', payload);",
+              "",
+              "// Verify standard claims",
+              "pm.test(\"Token has standard claims\", function() {",
+              "    pm.expect(payload).to.have.property('iss');",
+              "    pm.expect(payload).to.have.property('sub');",
+              "    pm.expect(payload).to.have.property('aud');",
+              "    pm.expect(payload).to.have.property('exp');",
+              "    pm.expect(payload).to.have.property('iat');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/method/frappe.integrations.oauth2.openid_profile",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "frappe.integrations.oauth2.openid_profile"
+          ]
+        },
+        "description": "This request doesn't actually make an API call - it's just a placeholder. The test script will decode and analyze the ID token to verify it's signed with RS256 and has a key ID."
+      },
+      "response": []
+    },
+    {
+      "name": "6. Userinfo Endpoint",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{access_token}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/method/frappe.integrations.oauth2.openid_profile",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "frappe.integrations.oauth2.openid_profile"
+          ]
+        },
+        "description": "Gets user information using the access token."
+      },
+      "response": []
+    },
+    {
+      "name": "7. Refresh Token",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "// Store tokens from response",
+              "var jsonData = pm.response.json();",
+              "if (jsonData.access_token) {",
+              "    pm.collectionVariables.set(\"access_token\", jsonData.access_token);",
+              "}",
+              "if (jsonData.id_token) {",
+              "    pm.collectionVariables.set(\"id_token\", jsonData.id_token);",
+              "}",
+              "if (jsonData.refresh_token) {",
+              "    pm.collectionVariables.set(\"refresh_token\", jsonData.refresh_token);",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/x-www-form-urlencoded"
+          }
+        ],
+        "body": {
+          "mode": "urlencoded",
+          "urlencoded": [
+            {
+              "key": "grant_type",
+              "value": "refresh_token",
+              "type": "text"
+            },
+            {
+              "key": "refresh_token",
+              "value": "{{refresh_token}}",
+              "type": "text"
+            },
+            {
+              "key": "client_id",
+              "value": "{{client_id}}",
+              "type": "text"
+            },
+            {
+              "key": "client_secret",
+              "value": "{{client_secret}}",
+              "type": "text"
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{base_url}}/api/method/frappe.integrations.oauth2.get_token",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "frappe.integrations.oauth2.get_token"
+          ]
+        },
+        "description": "Refreshes the access token using the refresh token received earlier."
+      },
+      "response": []
+    },
+    {
+      "name": "8. Token Introspection",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/x-www-form-urlencoded"
+          }
+        ],
+        "body": {
+          "mode": "urlencoded",
+          "urlencoded": [
+            {
+              "key": "token",
+              "value": "{{access_token}}",
+              "type": "text"
+            },
+            {
+              "key": "token_type_hint",
+              "value": "access_token",
+              "type": "text"
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{base_url}}/api/method/frappe.integrations.oauth2.introspect_token",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "frappe.integrations.oauth2.introspect_token"
+          ]
+        },
+        "description": "Introspects the token to verify if it's still valid."
+      },
+      "response": []
+    },
+    {
+      "name": "9. Revoke Token",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/x-www-form-urlencoded"
+          }
+        ],
+        "body": {
+          "mode": "urlencoded",
+          "urlencoded": [
+            {
+              "key": "token",
+              "value": "{{access_token}}",
+              "type": "text"
+            },
+            {
+              "key": "token_type_hint",
+              "value": "access_token",
+              "type": "text"
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{base_url}}/api/method/frappe.integrations.oauth2.revoke_token",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "frappe.integrations.oauth2.revoke_token"
+          ]
+        },
+        "description": "Revokes the access token."
+      },
+      "response": []
+    }
+  ]
+} 

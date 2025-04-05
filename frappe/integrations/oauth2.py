@@ -180,26 +180,40 @@ def openid_profile(*args, **kwargs):
 @frappe.whitelist(allow_guest=True)
 def openid_configuration():
 	frappe_server_url = get_server_url()
-	frappe.local.response = frappe._dict(
-		{
-			"issuer": frappe_server_url,
-			"authorization_endpoint": f"{frappe_server_url}/api/method/frappe.integrations.oauth2.authorize",
-			"token_endpoint": f"{frappe_server_url}/api/method/frappe.integrations.oauth2.get_token",
-			"userinfo_endpoint": f"{frappe_server_url}/api/method/frappe.integrations.oauth2.openid_profile",
-			"revocation_endpoint": f"{frappe_server_url}/api/method/frappe.integrations.oauth2.revoke_token",
-			"introspection_endpoint": f"{frappe_server_url}/api/method/frappe.integrations.oauth2.introspect_token",
-			"response_types_supported": [
-				"code",
-				"token",
-				"code id_token",
-				"code token id_token",
-				"id_token",
-				"id_token token",
-			],
-			"subject_types_supported": ["public"],
+	
+	config = {
+		"issuer": frappe_server_url,
+		"authorization_endpoint": f"{frappe_server_url}/api/method/frappe.integrations.oauth2.authorize",
+		"token_endpoint": f"{frappe_server_url}/api/method/frappe.integrations.oauth2.get_token",
+		"userinfo_endpoint": f"{frappe_server_url}/api/method/frappe.integrations.oauth2.openid_profile",
+		"revocation_endpoint": f"{frappe_server_url}/api/method/frappe.integrations.oauth2.revoke_token",
+		"introspection_endpoint": f"{frappe_server_url}/api/method/frappe.integrations.oauth2.introspect_token",
+		"response_types_supported": [
+			"code",
+			"token",
+			"code id_token",
+			"code token id_token",
+			"id_token",
+			"id_token token",
+		],
+		"subject_types_supported": ["public"],
+	}
+	
+	# Get OAuth settings to check if JWKS is enabled
+	oauth_settings = get_oauth_settings()
+	
+	if oauth_settings.jwks_enabled:
+		# Add JWKS URI and update signing algorithm
+		config.update({
+			"jwks_uri": f"{frappe_server_url}/api/method/frappe.integrations.oauth2.jwks",
+			"id_token_signing_alg_values_supported": ["RS256", "HS256"],
+		})
+	else:
+		config.update({
 			"id_token_signing_alg_values_supported": ["HS256"],
-		}
-	)
+		})
+		
+	frappe.local.response = frappe._dict(config)
 
 
 @frappe.whitelist(allow_guest=True)
@@ -242,3 +256,22 @@ def introspect_token(token=None, token_type_hint=None):
 
 	except Exception:
 		frappe.local.response = frappe._dict({"active": False})
+
+
+@frappe.whitelist(allow_guest=True)
+def jwks():
+	"""
+	Endpoint to serve the JSON Web Key Set (JWKS)
+	
+	The JWKS contains the public keys that can be used to verify the JWTs issued by the server
+	"""
+	from frappe.integrations.doctype.oauth_provider_settings.oauth_provider_settings import OAuthProviderSettings
+	
+	# Get OAuth Provider Settings
+	settings = frappe.get_doc("OAuth Provider Settings")
+	
+	# Get JWKS from settings
+	jwks_data = settings.get_jwks()
+	
+	frappe.local.response = frappe._dict(jwks_data)
+	frappe.local.response.headers = {"Content-Type": "application/json", "Cache-Control": "public, max-age=3600"}

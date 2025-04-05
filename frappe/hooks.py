@@ -63,6 +63,10 @@ website_redirects = [
 		"source": "/.well-known/openid-configuration",
 		"target": "/api/method/frappe.integrations.oauth2.openid_configuration",
 	},
+	{
+		"source": "/.well-known/jwks.json",
+		"target": "/api/method/frappe.integrations.oauth2.jwks",
+	},
 ]
 
 base_template = "templates/base.html"
@@ -242,6 +246,7 @@ scheduler_events = {
 		"frappe.integrations.doctype.google_contacts.google_contacts.sync",
 		"frappe.automation.doctype.auto_repeat.auto_repeat.make_auto_repeat_entry",
 		"frappe.automation.doctype.auto_repeat.auto_repeat.set_auto_repeat_as_completed",
+		"frappe.integrations.doctype.oauth_provider_settings.oauth_provider_settings.check_jwks_key_rotation",
 	],
 	"daily_long": [
 		"frappe.integrations.doctype.dropbox_settings.dropbox_settings.take_backups_daily",

@@ -12,6 +12,7 @@ from oauthlib.openid import RequestValidator
 import frappe
 from frappe.auth import LoginManager
 from frappe.utils.data import cstr, get_system_timezone, now_datetime
+from frappe.integrations.doctype.oauth_provider_settings.oauth_provider_settings import get_oauth_settings
 
 
 class OAuthWebRequestValidator(RequestValidator):
@@ -307,7 +308,14 @@ class OAuthWebRequestValidator(RequestValidator):
 
 	def finalize_id_token(self, id_token, token, token_handler, request):
 		# Check whether frappe server URL is set
-		id_token_header = {"typ": "jwt", "alg": "HS256"}
+		oauth_settings = get_oauth_settings()
+		use_jwks = oauth_settings.jwks_enabled and oauth_settings.jwks_private_key
+		
+		# Set the header based on the signing algorithm
+		if use_jwks:
+			id_token_header = {"typ": "jwt", "alg": "RS256", "kid": oauth_settings.jwks_key_id}
+		else:
+			id_token_header = {"typ": "jwt", "alg": "HS256"}
 
 		user = frappe.get_doc("User", request.user)
 
@@ -324,12 +332,21 @@ class OAuthWebRequestValidator(RequestValidator):
 		if "openid" in request.scopes:
 			id_token.update(userinfo)
 
-		id_token_encoded = jwt.encode(
-			payload=id_token,
-			key=request.client.client_secret,
-			algorithm="HS256",
-			headers=id_token_header,
-		)
+		# Use RSA private key for signing if JWKS is enabled, otherwise use client secret
+		if use_jwks:
+			id_token_encoded = jwt.encode(
+				payload=id_token,
+				key=oauth_settings.jwks_private_key,
+				algorithm="RS256",
+				headers=id_token_header,
+			)
+		else:
+			id_token_encoded = jwt.encode(
+				payload=id_token,
+				key=request.client.client_secret,
+				algorithm="HS256",
+				headers=id_token_header,
+			)
 
 		return frappe.safe_decode(id_token_encoded)
 
@@ -364,9 +381,40 @@ class OAuthWebRequestValidator(RequestValidator):
 
 	def validate_id_token(self, token, scopes, request):
 		try:
+			# First check if token is in database
 			id_token = frappe.get_doc("OAuth Bearer Token", token)
 			if id_token.status == "Active":
 				return True
+				
+			# If not in database, try to validate it as a JWT token
+			# First decode without verification to get header
+			unverified_header = jwt.get_unverified_header(token)
+			
+			# Check if it's an RS256 token
+			if unverified_header.get("alg") == "RS256":
+				# Get JWKS settings
+				oauth_settings = get_oauth_settings()
+				
+				if not oauth_settings.jwks_enabled or not oauth_settings.jwks_public_key:
+					return False
+					
+				# Verify using public key
+				try:
+					payload = jwt.decode(
+						token,
+						key=oauth_settings.jwks_public_key,
+						algorithms=["RS256"],
+						options={"verify_aud": False} # We're not checking audience here
+					)
+					
+					# If the token contains 'openid' in the scopes
+					if "openid" in payload.get("scope", "").split():
+						return True
+						
+					return False
+				except Exception:
+					return False
+					
 		except Exception:
 			return False
 
@@ -374,9 +422,38 @@ class OAuthWebRequestValidator(RequestValidator):
 
 	def validate_jwt_bearer_token(self, token, scopes, request):
 		try:
-			jwt = frappe.get_doc("OAuth Bearer Token", token)
-			if jwt.status == "Active":
+			# First check if token is in database
+			jwt_token = frappe.get_doc("OAuth Bearer Token", token)
+			if jwt_token.status == "Active":
 				return True
+				
+			# If not in database, try to validate it as a JWT token
+			# First decode without verification to get header
+			unverified_header = jwt.get_unverified_header(token)
+			
+			# Check if it's an RS256 token
+			if unverified_header.get("alg") == "RS256":
+				# Get JWKS settings
+				oauth_settings = get_oauth_settings()
+				
+				if not oauth_settings.jwks_enabled or not oauth_settings.jwks_public_key:
+					return False
+					
+				# Verify using public key
+				try:
+					payload = jwt.decode(
+						token,
+						key=oauth_settings.jwks_public_key,
+						algorithms=["RS256"],
+						options={"verify_aud": False} # We're not checking audience here
+					)
+					
+					# If validation passes, check if scopes are valid
+					token_scopes = payload.get("scope", "").split()
+					return all(scope in token_scopes for scope in scopes)
+				except Exception:
+					return False
+					
 		except Exception:
 			return False
 
@@ -443,41 +520,78 @@ class OAuthWebRequestValidator(RequestValidator):
 		"""
 		if id_token_hint:
 			try:
-				user = None
-				payload = jwt.decode(
+				# First decode without verification to get the payload and header
+				unverified_payload = jwt.decode(
 					id_token_hint,
-					algorithms=["HS256"],
+					algorithms=["HS256", "RS256"],
 					options={
 						"verify_signature": False,
 						"verify_aud": False,
 					},
 				)
-				client_id, client_secret = frappe.get_value(
+				
+				# Get the header to check the algorithm and key ID
+				unverified_header = jwt.get_unverified_header(id_token_hint)
+				
+				client_id = unverified_payload.get("aud")
+				
+				if not client_id:
+					return False
+					
+				# Get the client details
+				client_data = frappe.db.get_value(
 					"OAuth Client",
-					payload.get("aud"),
+					client_id,
 					["client_id", "client_secret"],
+					as_dict=True
 				)
-
-				if payload.get("sub") and client_id and client_secret:
-					user = frappe.db.get_value(
-						"User Social Login",
-						{"userid": payload.get("sub"), "provider": "frappe"},
-						"parent",
-					)
-					user = frappe.get_doc("User", user)
+				
+				if not client_data:
+					return False
+					
+				# Check the signing algorithm
+				alg = unverified_header.get("alg", "HS256")
+				
+				if alg == "RS256":
+					# For RS256, use the public key from OAuth Provider Settings
+					oauth_settings = get_oauth_settings()
+					
+					if not oauth_settings.jwks_enabled or not oauth_settings.jwks_public_key:
+						return False
+						
+					# Verify token using public key
 					verified_payload = jwt.decode(
 						id_token_hint,
-						key=client_secret,
-						audience=client_id,
+						key=oauth_settings.jwks_public_key,
+						algorithms=["RS256"],
+						audience=client_data.client_id,
+						options={
+							"verify_exp": False,
+						},
+					)
+				else:
+					# For HS256, verify using client secret as before
+					verified_payload = jwt.decode(
+						id_token_hint,
+						key=client_data.client_secret,
+						audience=client_data.client_id,
 						algorithms=["HS256"],
 						options={
 							"verify_exp": False,
 						},
 					)
-
-					if verified_payload:
+				
+				if verified_payload:
+					# Get user from sub claim
+					user = frappe.db.get_value(
+						"User Social Login",
+						{"userid": verified_payload.get("sub"), "provider": "frappe"},
+						"parent",
+					)
+					if user:
+						user = frappe.get_doc("User", user)
 						return user.name == frappe.session.user
-
+						
 			except Exception:
 				return False
 

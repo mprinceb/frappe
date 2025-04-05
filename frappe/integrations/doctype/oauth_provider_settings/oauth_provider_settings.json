@@ -6,7 +6,13 @@
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
-  "skip_authorization"
+  "skip_authorization",
+  "jwks_section",
+  "jwks_enabled",
+  "jwks_key_id",
+  "jwks_private_key",
+  "jwks_public_key",
+  "jwks_expiry"
  ],
  "fields": [
   {
@@ -14,6 +20,46 @@
    "fieldtype": "Select",
    "label": "Skip Authorization",
    "options": "Force\nAuto"
+  },
+  {
+   "fieldname": "jwks_section",
+   "fieldtype": "Section Break",
+   "label": "JSON Web Key Set (JWKS)"
+  },
+  {
+   "default": "0",
+   "fieldname": "jwks_enabled",
+   "fieldtype": "Check",
+   "label": "Enable JWKS for JWT Signing"
+  },
+  {
+   "depends_on": "jwks_enabled",
+   "description": "Unique identifier for this key",
+   "fieldname": "jwks_key_id",
+   "fieldtype": "Data",
+   "label": "Key ID (kid)"
+  },
+  {
+   "depends_on": "jwks_enabled",
+   "fieldname": "jwks_private_key",
+   "fieldtype": "Code",
+   "label": "JWKS Private Key (PEM)",
+   "options": "RSA Private Key",
+   "read_only": 1
+  },
+  {
+   "depends_on": "jwks_enabled",
+   "fieldname": "jwks_public_key",
+   "fieldtype": "Code", 
+   "label": "JWKS Public Key (PEM)",
+   "options": "RSA Public Key",
+   "read_only": 1
+  },
+  {
+   "depends_on": "jwks_enabled",
+   "fieldname": "jwks_expiry",
+   "fieldtype": "Datetime",
+   "label": "Key Expiry Date"
   }
  ],
  "issingle": 1,

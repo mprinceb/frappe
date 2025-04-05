@@ -12,6 +12,7 @@ from frappe.integrations.oauth2 import encode_params
 from frappe.test_runner import make_test_records
 from frappe.tests.test_api import get_test_client, make_request, suppress_stdout
 from frappe.tests.utils import FrappeTestCase
+from frappe.integrations.doctype.oauth_provider_settings.oauth_provider_settings import get_oauth_settings
 
 if TYPE_CHECKING:
 	from frappe.integrations.doctype.social_login_key.social_login_key import SocialLoginKey
@@ -363,13 +364,41 @@ class TestOAuth20(FrappeRequestTestCase):
 	def decode_id_token(self, id_token):
 		import jwt
 
-		return jwt.decode(
-			id_token,
-			audience=self.client_id,
-			key=self.client_secret,
-			algorithms=["HS256"],
-			options={"verify_signature": True, "require": ["exp", "iat", "aud"]},
-		)
+		if id_token is None:
+			return None
+			
+		# Handle both string and bytes tokens
+		if isinstance(id_token, str):
+			id_token = id_token.encode("utf-8")
+		
+		# First check the header to determine the algorithm
+		try:
+			header = jwt.get_unverified_header(id_token)
+			alg = header.get("alg", "HS256")
+			
+			if alg == "RS256":
+				# For RS256, we need to get the public key from OAuth Provider Settings
+				oauth_settings = frappe.get_doc("OAuth Provider Settings")
+				if oauth_settings.jwks_enabled and oauth_settings.jwks_public_key:
+					return jwt.decode(
+						id_token,
+						key=oauth_settings.jwks_public_key,
+						algorithms=["RS256"],
+						audience=self.client_id,
+						options={"verify_signature": True, "require": ["exp", "iat", "aud"]},
+					)
+			
+			# Default to HS256 for backward compatibility
+			return jwt.decode(
+				id_token,
+				audience=self.client_id,
+				key=self.client_secret,
+				algorithms=["HS256"],
+				options={"verify_signature": True, "require": ["exp", "iat", "aud"]},
+			)
+		except Exception as e:
+			frappe.logger().error(f"Error decoding token: {str(e)}")
+			raise
 
 
 def check_valid_openid_response(access_token=None, client: "FrappeRequestTestCase" = None):
